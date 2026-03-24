@@ -12,7 +12,7 @@
         .hidden { display: none; }
         label { display: block; font-weight: bold; font-size: 11px; color: #666; text-transform: uppercase; margin-bottom: 4px; }
         input, select, textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 14px; }
-        textarea { height: 90px; resize: none; font-family: inherit; }
+        textarea { height: 80px; resize: none; font-family: inherit; }
         .ai-btn { background: var(--primary-blue); color: white; border: none; padding: 12px; width: 100%; border-radius: 6px; font-weight: bold; cursor: pointer; margin-top: 5px; }
         .copy-btn { background: #10b981; color: white; border: none; padding: 15px; width: 100%; border-radius: 6px; font-weight: bold; cursor: pointer; margin-top: 15px; font-size: 16px; }
         .subject-display { background: #eef2f7; padding: 12px; border-radius: 6px; border: 1px dashed var(--primary-blue); font-family: monospace; font-size: 13px; margin-bottom: 20px; cursor: pointer; color: var(--primary-blue); font-weight: bold; }
@@ -32,7 +32,7 @@
     <div class="field"><label>Incident ID</label><input type="text" id="incID" placeholder="INC-12345" oninput="updateUI()"></div>
     <div class="field">
         <label>Status</label>
-        <select id="incStatus" onchange="updateUI()">
+        <select id="incStatus" onchange="handleStatusChange()">
             <option value="Open">🔴 Open</option>
             <option value="Ongoing">🟡 Ongoing</option>
             <option value="Resolved">🟢 Resolved</option>
@@ -44,6 +44,11 @@
     <hr style="border:0; border-top:1px solid #eee; margin:20px 0;">
     <h2 style="color:var(--primary-blue);">2. AI Refinement</h2>
     
+    <div class="field">
+        <label>Opening Message</label>
+        <textarea id="field_Msg" placeholder="e.g. We are writing to inform you..."></textarea>
+    </div>
+
     <div id="aiInputs"></div>
     
     <button class="ai-btn" id="aiBtn" onclick="runGemini()">✨ Refine Fields with Gemini AI</button>
@@ -97,37 +102,39 @@
     window.onload = function() {
         const savedKey = localStorage.getItem('generic_gemini_key');
         if (savedKey) { document.getElementById('userApiKey').value = savedKey; document.getElementById('keySection').style.display = 'none'; }
-        updateUI();
+        handleStatusChange();
     };
 
     function saveKey() { localStorage.setItem('generic_gemini_key', document.getElementById('userApiKey').value.trim()); document.getElementById('keySection').style.display = 'none'; }
     function clearKey() { localStorage.removeItem('generic_gemini_key'); location.reload(); }
 
-    // FIXED: Now uses Intl.DateTimeFormat to handle Daylight Savings automatically
     function calculateTimezones(timeVal) {
         if (!timeVal) return "-";
-        
-        // datetime-local input is in local time; we append 'Z' to treat the user's input as UTC
         const date = new Date(timeVal + ":00Z");
         if (isNaN(date.getTime())) return "-";
-
-        const formatTime = (tz) => {
-            return new Intl.DateTimeFormat('en-GB', {
-                timeZone: tz,
-                hour: '2-digit',
-                minute: '2-digit',
-                hour12: false
-            }).format(date);
-        };
-
+        const formatTime = (tz) => new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(date);
         return `<strong>UTC:</strong> ${formatTime('UTC')} | <strong>GMT:</strong> ${formatTime('GMT')} | <strong>UK:</strong> ${formatTime('Europe/London')}<br>
                 <strong>EST:</strong> ${formatTime('America/New_York')} | <strong>CST:</strong> ${formatTime('America/Chicago')} | <strong>MST:</strong> ${formatTime('America/Denver')} | <strong>PST:</strong> ${formatTime('America/Los_Angeles')}`;
+    }
+
+    function handleStatusChange() {
+        const status = document.getElementById('incStatus').value;
+        const msgField = document.getElementById('field_Msg');
+        
+        // Auto-suggest message based on status
+        if (status === "Resolved") {
+            msgField.value = "We are pleased to inform you that the major Incident impacting the payment platform has been resolved.";
+        } else {
+            msgField.value = "We are currently experiencing a major Incident impacting the payment platform, below are the details:";
+        }
+        updateUI();
     }
 
     function updateUI() {
         const status = document.getElementById('incStatus').value;
         const currentFields = schema[status];
         
+        // Update Editor Inputs
         const aiInputs = document.getElementById('aiInputs');
         const existingData = {};
         aiInputs.querySelectorAll('textarea').forEach(t => existingData[t.id] = t.value);
@@ -139,6 +146,10 @@
             </div>
         `).join('');
 
+        // Update Template Opening
+        document.getElementById('dOpening').innerText = document.getElementById('field_Msg').value;
+
+        // Update Template Rows
         const tableBody = document.getElementById('dynamicTableRows');
         tableBody.innerHTML = currentFields.map(f => `
             <tr>
@@ -163,11 +174,9 @@
             document.getElementById('endTimeContainer').classList.remove('hidden');
             document.getElementById('dEndRow').classList.remove('hidden');
             document.getElementById('dEndTimeDisplay').innerHTML = calculateTimezones(document.getElementById('endTime').value);
-            document.getElementById('dOpening').innerText = `We are pleased to inform you that the major Incident impacting the payment platform has been resolved.`;
         } else {
             document.getElementById('endTimeContainer').classList.add('hidden');
             document.getElementById('dEndRow').classList.add('hidden');
-            document.getElementById('dOpening').innerText = `We are currently experiencing a major Incident impacting the payment platform, below are the details:`;
         }
     }
 
@@ -177,16 +186,29 @@
         const status = document.getElementById('incStatus').value;
         const currentFields = schema[status];
         const btn = document.getElementById('aiBtn');
-        const notes = currentFields.map(f => `${f.label}: ${document.getElementById('field_'+f.id).value}`).join('\n');
+        
+        // Add Opening Msg to the notes for AI to refine
+        const notes = `Opening: ${document.getElementById('field_Msg').value}\n` + 
+                      currentFields.map(f => `${f.label}: ${document.getElementById('field_'+f.id).value}`).join('\n');
         
         btn.disabled = true; btn.innerText = "Refining...";
 
         try {
             const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${key}`;
-            const prompt = `Professionalize these notes for a ${status} incident status. Return exactly in this format: ${currentFields.map(f => `[${f.tag}]: (refined text)`).join(' ')} \nNOTES:\n${notes}`;
+            const prompt = `Professionalize these notes for a ${status} incident status. Return exactly in this format: [MSG]: (opening statement) ${currentFields.map(f => `[${f.tag}]: (refined text)`).join(' ')} \nNOTES:\n${notes}`;
+            
             const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) });
             const data = await response.json();
             const text = data.candidates[0].content.parts[0].text;
+
+            // Update Opening Msg
+            const msgMatch = text.match(/\[MSG\]: (.*?)(?=\[|$)/s);
+            if(msgMatch) {
+                document.getElementById('field_Msg').value = msgMatch[1].trim();
+                document.getElementById('dOpening').innerText = msgMatch[1].trim();
+            }
+
+            // Update Table Fields
             currentFields.forEach(f => {
                 const regex = new RegExp(`\\[${f.tag}\\]: (.*?)(?=\\[|$)`, 's');
                 const match = text.match(regex);
