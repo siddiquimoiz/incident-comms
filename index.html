@@ -103,15 +103,25 @@
     function saveKey() { localStorage.setItem('generic_gemini_key', document.getElementById('userApiKey').value.trim()); document.getElementById('keySection').style.display = 'none'; }
     function clearKey() { localStorage.removeItem('generic_gemini_key'); location.reload(); }
 
+    // FIXED: Now uses Intl.DateTimeFormat to handle Daylight Savings automatically
     function calculateTimezones(timeVal) {
         if (!timeVal) return "-";
-        const d = new Date(timeVal);
-        const tz = (o) => {
-            const date = new Date(d.getTime() + (o * 3600000));
-            return date.getUTCHours().toString().padStart(2, '0') + ":" + date.getUTCMinutes().toString().padStart(2, '0');
+        
+        // datetime-local input is in local time; we append 'Z' to treat the user's input as UTC
+        const date = new Date(timeVal + ":00Z");
+        if (isNaN(date.getTime())) return "-";
+
+        const formatTime = (tz) => {
+            return new Intl.DateTimeFormat('en-GB', {
+                timeZone: tz,
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false
+            }).format(date);
         };
-        return `<strong>UTC:</strong> ${tz(0)} | <strong>GMT:</strong> ${tz(0)} | <strong>UK:</strong> ${tz(1)}<br>
-                <strong>EST:</strong> ${tz(-5)} | <strong>CST:</strong> ${tz(-6)} | <strong>MST:</strong> ${tz(-7)} | <strong>PST:</strong> ${tz(-8)}`;
+
+        return `<strong>UTC:</strong> ${formatTime('UTC')} | <strong>GMT:</strong> ${formatTime('GMT')} | <strong>UK:</strong> ${formatTime('Europe/London')}<br>
+                <strong>EST:</strong> ${formatTime('America/New_York')} | <strong>CST:</strong> ${formatTime('America/Chicago')} | <strong>MST:</strong> ${formatTime('America/Denver')} | <strong>PST:</strong> ${formatTime('America/Los_Angeles')}`;
     }
 
     function updateUI() {
